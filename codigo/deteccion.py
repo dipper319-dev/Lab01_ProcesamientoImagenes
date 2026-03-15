@@ -28,7 +28,7 @@ def mouse_callback(event, _x, _y, flags, param):
 # Abrir video
 # -----------------------------
 
-cap = cv2.VideoCapture("video/video_test2.mp4")
+cap = cv2.VideoCapture("video/vehiculo_test.mp4")
 
 if not cap.isOpened():
     print("Error: no se pudo abrir el video")
