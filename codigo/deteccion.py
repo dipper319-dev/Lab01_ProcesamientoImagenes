@@ -1,9 +1,9 @@
 import cv2
 import numpy as np
 
-#----------------------
+#------------------------
 #Para Los que usen esto por primera vez ejecuten esto en consola para bajar las librerias "pip install -r requirements.txt"
-#----------------------
+#------------------------
 
 
 
