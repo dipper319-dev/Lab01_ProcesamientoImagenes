@@ -1,7 +1,7 @@
 # Lab01_ProcesamientoImagenes
 Análisis del movimiento de un vehículo en video mediante visión por computadora con Python y OpenCV.
 
-## Instalación (Windows)
+## Crear entorno virtual e instalar dependencias(Windows)
 
 1. Si no existe `.venv` (o se borró), créalo:
 
@@ -20,7 +20,11 @@ py -m venv .venv
 ```cmd
 .venv\Scripts\activate
 ```
+Si usas `PowerShell`, puede que necesites:
 
+```PowerShell
+.venv\Scripts\Activate.ps1
+```
 3. Instalar dependencias:
 
 ```cmd
