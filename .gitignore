@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 datos_cinematicos.json
+graficas_cinematica.png
+resultados_cinematicos.csv

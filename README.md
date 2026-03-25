@@ -1,7 +1,20 @@
 # Lab01_ProcesamientoImagenes
 Análisis del movimiento de un vehículo en video mediante visión por computadora con Python y OpenCV.
 
-## Crear entorno virtual e instalar dependencias(Windows)
+## Objetivo
+
+Analizar el movimiento de un vehículo a partir de un video, aplicando segmentación, morfología, detección de contornos y cálculo de centroides para estimar posición, velocidad y aceleración, y comparar con un modelo cinemático teórico.
+
+## Estructura del proyecto
+
+- `video/Carro2.mp4`: video de entrada.
+- `codigo/deteccion.py`: Punto 2 (detección y extracción de centroides).
+- `codigo/analisis_cinematico.py`: Punto 3 (análisis cinemático).
+- `datos_cinematicos.json`: salida del Punto 2 (insumo del Punto 3).
+- `graficas_cinematica.png`: salida del Punto 3.
+- `resultados_cinematicos.csv`: salida del Punto 3.
+
+## Crear entorno virtual e instalar dependencias (Windows)
 
 1. Si no existe `.venv` (o se borró), créalo:
 
@@ -30,4 +43,73 @@ Si usas `PowerShell`, puede que necesites:
 ```cmd
 python -m pip install -r requirements.txt
 ```
+
+## Ejecución (Punto 2 y Punto 3)
+
+### 1) Detección y segmentación (Punto 2)
+
+Ejecuta:
+
+```cmd
+python codigo/deteccion.py
+```
+
+Controles durante ejecución:
+
+- Clic izquierdo: muestra coordenada del píxel (útil para calibración A y B).
+- Clic derecho: pausar/reanudar video.
+- Tecla `Esc`: salir.
+
+Salida principal generada:
+
+- `datos_cinematicos.json` con:
+	- FPS y resolución del video.
+	- lista de centroides por frame detectado.
+	- vector de tiempos asociado.
+
+### 2) Análisis cinemático (Punto 3)
+
+Ejecuta:
+
+```cmd
+python codigo/analisis_cinematico.py
+```
+
+El script solicitará:
+
+- Coordenada X del punto A (en píxeles).
+- Coordenada X del punto B (en píxeles).
+- Distancia real entre A y B (en metros).
+
+Salidas generadas:
+
+- `graficas_cinematica.png` (posición, velocidad y aceleración vs tiempo).
+- `resultados_cinematicos.csv` (tiempo, centroides, posición, velocidad, aceleración).
+
+## Cobertura de la rúbrica (hasta Punto 3)
+
+### Punto 1 (Grabación)
+
+Se utiliza un video lateral con cámara fija y marcadores de referencia A/B para calibrar escala píxeles-metros.
+
+### Punto 2 (Detección y segmentación)
+
+Implementado en `codigo/deteccion.py`:
+
+- Sustracción de fondo con MOG2.
+- Soporte de segmentación HSV (opcional y combinable).
+- Limpieza por operaciones morfológicas (apertura, cierre y dilatación).
+- Detección de contornos con `cv2.findContours()`.
+- Cálculo de centroides por momentos con `cv2.moments()`.
+
+### Punto 3 (Análisis cinemático)
+
+Implementado en `codigo/analisis_cinematico.py`:
+
+- Conversión de posición de píxeles a metros (calibración A-B).
+- Velocidad instantánea por diferencias finitas.
+- Aceleración instantánea como derivada de la velocidad.
+- Suavizado de señal (Savitzky-Golay) antes de derivar.
+- Clasificación del tipo de movimiento y comparación con modelo teórico (MRU/MRUA).
+- Gráficas y exportación de resultados en CSV.
 

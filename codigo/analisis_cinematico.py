@@ -30,6 +30,15 @@ class AnalisisCinematico:
         self.centroides = np.array([(c['x'], c['y']) for c in self.datos['centroides']])
         self.tiempos    = np.array(self.datos['tiempos'])
 
+        if len(self.centroides) == 0 or len(self.tiempos) == 0:
+            print("❌ Error: no hay datos de centroides/tiempos para analizar")
+            print("   Ejecuta primero deteccion.py y verifica que se detecte el vehículo")
+            exit()
+
+        if len(self.centroides) != len(self.tiempos):
+            print("❌ Error: inconsistencia entre cantidad de centroides y tiempos")
+            exit()
+
         # Resultados calculados (se llenan con los métodos)
         self.pixeles_por_metro  = None
         self.posicion_metros    = None
@@ -56,6 +65,10 @@ class AnalisisCinematico:
         parámetro para que el usuario pueda ingresar el valor correcto de su
         grabación específica.
         """
+        if distancia_real_metros <= 0:
+            print("❌ Error: la distancia real A-B debe ser mayor que cero")
+            return None
+
         distancia_pixeles = abs(pixel_B - pixel_A)
 
         if distancia_pixeles == 0:
@@ -130,6 +143,11 @@ class AnalisisCinematico:
         else:
             señal = self.posicion_suavizada
 
+        if len(señal) < 2 or len(self.tiempos) < 2:
+            self.velocidad = np.zeros(len(señal))
+            print("⚠  Datos insuficientes para derivada: velocidad asignada a cero")
+            return
+
         desplazamiento = np.diff(señal)
         tiempo_diff    = np.diff(self.tiempos)
 
@@ -150,6 +168,15 @@ class AnalisisCinematico:
         Calcula aceleración instantánea como segunda derivada numérica
         sobre la velocidad ya calculada.
         """
+        if self.velocidad is None:
+            print("❌ Error: primero debes calcular la velocidad")
+            return
+
+        if len(self.velocidad) < 2 or len(self.tiempos) < 2:
+            self.aceleracion = np.zeros(len(self.velocidad))
+            print("⚠  Datos insuficientes para segunda derivada: aceleración asignada a cero")
+            return
+
         velocidad_diff = np.diff(self.velocidad)
         tiempo_diff    = np.diff(self.tiempos)
 
@@ -177,6 +204,10 @@ class AnalisisCinematico:
           - Si no → MRUA
           - Si la desviación es >= 20% → movimiento con a variable
         """
+        if self.velocidad is None or self.aceleracion is None:
+            print("❌ Error: debes calcular velocidad y aceleración antes de clasificar")
+            return "No determinado", 0.0, 0.0
+
         v_media              = abs(np.mean(self.velocidad))
         a_promedio           = np.mean(self.aceleracion)
         desviacion_acel      = np.std(self.aceleracion)
@@ -213,7 +244,10 @@ class AnalisisCinematico:
         """
         t = self.tiempos - self.tiempos[0]   # tiempo relativo al inicio
 
-        if "MRU" in tipo and "MRUA" not in tipo:
+        if "No determinado" in tipo:
+            pos_teorica = np.zeros_like(t)
+            label_teorico = "Modelo teórico no determinado"
+        elif "MRU" in tipo and "MRUA" not in tipo:
             pos_teorica = v0 * t
             label_teorico = f"MRU teórico  (v₀={v0:.2f} m/s)"
         else:
