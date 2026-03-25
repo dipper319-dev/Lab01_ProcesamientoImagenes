@@ -1,14 +1,21 @@
 import cv2
 import numpy as np
 import json
+import os
 
+# ============================
+# ESTADOS DE INTERACCIÓN Y VISUALIZACIÓN
+# ============================
+# Variables para pausar, inspeccionar píxeles y guardar la posición del clic.
 pausar_video = False
 mostrar_pixel = False
 x, y = 0, 0
 
+# Listas donde se van acumulando los centroides detectados y su tiempo.
 centroides = []
 tiempos = []
 
+# Buffers del último frame procesado y resultados intermedios de segmentación.
 mascara_guardada = None
 mascara_mog2_guardada = None
 contorno_guardado = None
@@ -16,11 +23,13 @@ cx_guardado = None
 cy_guardado = None
 frame_base = None
 
+# Variables de seguimiento temporal para estimar velocidad frame a frame.
 ultimo_centroide = None
 ultimo_tiempo = None
 velocidad_inst_px_s = 0.0
 velocidad_inst_m_s = 0.0
 
+# Variables de calibración visual (marcadores A/B) y factor píxel-metro.
 mezcla_hsv_txt = 0
 ax = 100
 ay = 100
@@ -32,6 +41,10 @@ px_por_m = 0.0
 mostrar_marcadores = True
 modo_seleccion_marcador = None
 
+# ============================
+# PARÁMETROS DEL TRACKING
+# ============================
+# Estos umbrales ayudan a estabilizar el seguimiento y descartar ruido.
 WARMUP_FRAMES = 20
 MAX_DIST_SEGUIMIENTO_PX = 150
 MAX_GAP_FACTOR = 3.0
@@ -41,10 +54,16 @@ ASPECT_MIN = 0.8
 ASPECT_MAX = 5.5
 TRACK_LOST_FRAMES = 10
 
+# Contador para saber cuántos frames seguidos se perdió la detección.
 frames_sin_deteccion = 0
+
+# Carpeta donde se guardan las salidas del procesamiento.
+RESULTADOS_DIR = "resultados"
+os.makedirs(RESULTADOS_DIR, exist_ok=True)
 
 
 def mouse_callback(event, _x, _y, flags, param):
+    """Maneja los clics del mouse: pausar, leer píxel y fijar marcadores A/B."""
     global pausar_video, mostrar_pixel, x, y
     global ax, ay, bx, by, modo_seleccion_marcador
 
@@ -52,15 +71,15 @@ def mouse_callback(event, _x, _y, flags, param):
         if modo_seleccion_marcador == "A":
             ax, ay = _x, _y
             modo_seleccion_marcador = None
-            print(f"✅ Marcador A fijado: ({ax}, {ay})")
+            print(f"Marcador A fijado: ({ax}, {ay})")
         elif modo_seleccion_marcador == "B":
             bx, by = _x, _y
             modo_seleccion_marcador = None
-            print(f"✅ Marcador B fijado: ({bx}, {by})")
+            print(f"Marcador B fijado: ({bx}, {by})")
         else:
             x, y = _x, _y
             mostrar_pixel = True
-            print(f"📍 Clic en X={_x}, Y={_y}  ← usa este valor para calibración")
+            print(f"Clic en X={_x}, Y={_y}. Usa este valor para calibración")
 
     if event == cv2.EVENT_RBUTTONDOWN:
         pausar_video = not pausar_video
@@ -94,14 +113,16 @@ print("Controles: tecla 'a' + clic para fijar A en cono derecho; tecla 'b' + cli
 resp = input("¿Deseas guardar video final procesado? (s/n): ").strip().lower()
 exportar_video = resp == 's'
 
+# Si el usuario lo pide, también se exporta el video ya anotado con overlays.
 video_writer = None
 if exportar_video:
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    ruta_video_salida = os.path.join(RESULTADOS_DIR, "video_procesado_punto4.mp4")
     video_writer = cv2.VideoWriter(
-        "video_procesado_punto4.mp4", fourcc, fps, (frame_width, frame_height)
+        ruta_video_salida, fourcc, fps, (frame_width, frame_height)
     )
     if not video_writer.isOpened():
-        print("⚠ No se pudo crear video de salida. Se desactiva exportación.")
+        print("Advertencia: no se pudo crear el video de salida. Se desactiva la exportación.")
         video_writer = None
         exportar_video = False
 
@@ -111,6 +132,10 @@ subtractor = cv2.createBackgroundSubtractorMOG2(
     detectShadows=True
 )
 
+# ============================
+# CONFIGURACIÓN DE VENTANAS Y TRACKBARS
+# ============================
+# Se crean ventanas para visualizar video, máscara final y salida cruda de MOG2.
 WINDOW_WIDTH = 800
 WINDOW_HEIGHT = 600
 
@@ -129,10 +154,19 @@ cv2.resizeWindow("Trackbars", 450, 450)
 
 
 def nothing(value):
+    """Función vacía para trackbars (OpenCV pide un callback)."""
     pass
 
 
 def seleccionar_mejor_contorno(contornos, area_minima, ultimo_centroide_ref, ancho_frame, alto_frame):
+    """
+    Escoge el contorno más confiable para representar el vehículo.
+
+    Estrategia:
+    - Filtra por área, forma y cercanía a bordes para quitar ruido.
+    - Si ya se venía siguiendo un centroide, prioriza el más cercano.
+    - Si no hay referencia previa, usa el de mayor área válida.
+    """
     area_maxima = AREA_MAX_RATIO * ancho_frame * alto_frame
     candidatos_validos = []
 
@@ -193,8 +227,12 @@ cv2.createTrackbar("S Min", "Trackbars", 0, 255, nothing)
 cv2.createTrackbar("S Max", "Trackbars", 255, 255, nothing)
 cv2.createTrackbar("V Min", "Trackbars", 0, 255, nothing)
 cv2.createTrackbar("V Max", "Trackbars", 255, 255, nothing)
-cv2.createTrackbar("Dist AB cm", "Trackbars", 500, 5000, nothing)
+cv2.createTrackbar("Dist AB cm", "Trackbars", 8000, 10000, nothing)
 
+# ============================
+# LOOP PRINCIPAL
+# ============================
+# En cada iteración: leer frame -> segmentar -> detectar/seguir -> dibujar -> mostrar.
 while True:
     if not pausar_video:
         ret, frame = cap.read()
@@ -205,6 +243,7 @@ while True:
 
         frame_base = np.copy(frame)
 
+    # Lectura de parámetros ajustables en tiempo real.
         area_min = cv2.getTrackbarPos("Area Min", "Trackbars")
         kernel_size = cv2.getTrackbarPos("Kernel", "Trackbars")
         sensibilidad = cv2.getTrackbarPos("Sensibilidad", "Trackbars")
@@ -218,16 +257,20 @@ while True:
         v_max = cv2.getTrackbarPos("V Max", "Trackbars")
         distancia_ab_cm = cv2.getTrackbarPos("Dist AB cm", "Trackbars")
 
+        # Ajuste dinámico de sensibilidad del sustractor de fondo.
         subtractor.setVarThreshold(max(sensibilidad, 1))
 
+        # Kernel morfológico (siempre impar) para limpieza de máscara.
         k = max(1, kernel_size)
         if k % 2 == 0:
             k += 1
         kernel = np.ones((k, k), np.uint8)
 
+        # Segmentación por movimiento con MOG2.
         mascara_mog2_raw = subtractor.apply(frame_base)
         mascara_mog2 = cv2.threshold(mascara_mog2_raw, 200, 255, cv2.THRESH_BINARY)[1]
 
+        # Segmentación HSV opcional para combinar color + movimiento.
         mascara_hsv = np.zeros_like(mascara_mog2)
         if mezcla_hsv > 0:
             hsv = cv2.cvtColor(frame_base, cv2.COLOR_BGR2HSV)
@@ -235,6 +278,7 @@ while True:
             upper = np.array([h_max, s_max, v_max])
             mascara_hsv = cv2.inRange(hsv, lower, upper)
 
+        # Mezcla configurable: solo MOG2, solo HSV o intersección de ambas.
         if mezcla_hsv == 0:
             mascara = mascara_mog2
         elif mezcla_hsv == 100:
@@ -242,8 +286,10 @@ while True:
         else:
             mascara = cv2.bitwise_and(mascara_mog2, mascara_hsv)
 
+        # Limpieza morfológica para reducir ruido y cerrar huecos.
         mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel)
         mascara = cv2.morphologyEx(mascara, cv2.MORPH_CLOSE, kernel)
+        mascara = cv2.erode(mascara, kernel, iterations=1)
         mascara = cv2.dilate(mascara, kernel, iterations=1)
 
         contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -252,6 +298,7 @@ while True:
         cx_guardado = None
         cy_guardado = None
 
+        # Se espera un pequeño warmup para estabilizar el modelo de fondo.
         if frame_num >= WARMUP_FRAMES:
             candidato = seleccionar_mejor_contorno(
                 contornos,
@@ -267,6 +314,7 @@ while True:
                 tiempo_actual = frame_num / fps
                 centroide_actual = (cx_guardado, cy_guardado)
 
+                # Velocidad instantánea en píxeles/s a partir del último centroide.
                 if ultimo_centroide is not None and ultimo_tiempo is not None:
                     dt = tiempo_actual - ultimo_tiempo
                     if dt > 1e-9:
@@ -276,6 +324,7 @@ while True:
                 else:
                     velocidad_inst_px_s = 0.0
 
+                # Se almacenan datos para exportar trayectoria y análisis posterior.
                 centroides.append(centroide_actual)
                 tiempos.append(tiempo_actual)
                 ultimo_centroide = centroide_actual
@@ -284,10 +333,12 @@ while True:
             else:
                 frames_sin_deteccion += 1
                 if frames_sin_deteccion > TRACK_LOST_FRAMES:
+                    # Si se pierde varios frames seguidos, se reinicia continuidad.
                     ultimo_centroide = None
                     ultimo_tiempo = None
                     velocidad_inst_px_s = 0.0
 
+        # Conversión de velocidad a m/s usando escala A-B actual.
         distancia_ab_px = float(np.hypot(bx - ax, by - ay))
         if distancia_ab_px > 0 and distancia_ab_cm > 0:
             distancia_ab_m = distancia_ab_cm / 100.0
@@ -298,11 +349,13 @@ while True:
             px_por_m = 0.0
             velocidad_inst_m_s = 0.0
 
+        # Buffers para visualización y siguiente iteración.
         mascara_guardada = mascara.copy()
         mascara_mog2_guardada = mascara_mog2.copy()
         mezcla_hsv_txt = mezcla_hsv
         frame_num += 1
 
+    # Si todavía no hay frame válido, espera tecla y continúa.
     if frame_base is None:
         key = cv2.waitKey(30) & 0xFF
         if key == 27:
@@ -311,6 +364,7 @@ while True:
 
     frame2 = np.copy(frame_base)
 
+    # Overlay de inspección de color en el píxel seleccionado.
     if mostrar_pixel:
         pixel_color = frame2[y, x]
         pixel_hsv = cv2.cvtColor(np.uint8([[pixel_color]]), cv2.COLOR_BGR2HSV)[0][0]
@@ -322,6 +376,7 @@ while True:
 
     centroide_detectado = False
 
+    # Dibujo del objeto detectado: caja, contorno y centroide.
     if contorno_guardado is not None and cx_guardado is not None and cy_guardado is not None:
         centroide_detectado = True
 
@@ -335,6 +390,7 @@ while True:
         area_txt = f"Area: {int(cv2.contourArea(contorno_guardado))} px"
         cv2.putText(frame2, area_txt, (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
 
+    # Dibujo de trayectoria conectando centroides coherentes entre frames.
     if len(centroides) >= 2:
         max_gap_t = MAX_GAP_FACTOR / fps
         for i in range(1, len(centroides)):
@@ -347,6 +403,7 @@ while True:
     cv2.putText(frame2, f"Trayectoria: {len(centroides)} pts", (10, 225),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
 
+    # Dibujo de marcadores A/B para calibración visual.
     if mostrar_marcadores:
         cv2.circle(frame2, (ax, ay), 8, (255, 255, 0), -1)
         cv2.circle(frame2, (bx, by), 8, (255, 255, 0), -1)
@@ -359,6 +416,7 @@ while True:
         cv2.putText(frame2, texto_escala, (10, frame_height - 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
+    # Textos de estado general de detección y modo actual.
     estado = "Vehiculo detectado" if centroide_detectado else "Sin deteccion"
     color_estado = (0, 255, 0) if centroide_detectado else (0, 0, 255)
     cv2.putText(frame2, estado, (10, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color_estado, 2)
@@ -391,6 +449,7 @@ while True:
         cv2.putText(frame2, "|| PAUSADO", (10, 350),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
 
+    # Mostrar ventanas de salida.
     cv2.imshow("Video", frame2)
 
     if mascara_guardada is not None and mascara_mog2_guardada is not None:
@@ -400,6 +459,7 @@ while True:
     if exportar_video and video_writer is not None:
         video_writer.write(frame2)
 
+    # Manejo de teclado para interacción en vivo.
     key = cv2.waitKey(30) & 0xFF
 
     if key == 27:
@@ -407,15 +467,15 @@ while True:
 
     if key == ord('a'):
         modo_seleccion_marcador = "A"
-        print("🟨 Selección A activada: haz clic en el cono derecho")
+        print("Selección A activada: haz clic en el cono derecho")
 
     if key == ord('b'):
         modo_seleccion_marcador = "B"
-        print("🟨 Selección B activada: haz clic en el cono izquierdo")
+        print("Selección B activada: haz clic en el cono izquierdo")
 
     if key == ord('m'):
         mostrar_marcadores = not mostrar_marcadores
-        print("👁️ Marcadores A/B visibles" if mostrar_marcadores else "🙈 Marcadores A/B ocultos")
+        print("Marcadores A/B visibles" if mostrar_marcadores else "Marcadores A/B ocultos")
 
     if key == ord('s'):
         print(f"\n--- Estado actual en frame {frame_num} ---")
@@ -424,6 +484,10 @@ while True:
             print(f"Último centroide: {centroides[-1]}")
             print(f"Velocidad instantánea: {velocidad_inst_m_s:.3f} m/s")
 
+# ============================
+# CIERRE Y EXPORTACIÓN
+# ============================
+# Se imprimen métricas finales y se guarda el JSON con todo lo detectado.
 print("\n=== Procesamiento finalizado ===")
 print(f"FPS del video: {fps:.2f}")
 print(f"Frames procesados: {frame_num}")
@@ -459,17 +523,18 @@ if len(centroides) > 0:
     }
 
     try:
-        with open("datos_cinematicos.json", "w") as f:
+        ruta_json_salida = os.path.join(RESULTADOS_DIR, "datos_cinematicos.json")
+        with open(ruta_json_salida, "w") as f:
             json.dump(datos_cinematicos, f, indent=4)
-        print("\n✓ Datos guardados en: datos_cinematicos.json")
+        print(f"\nDatos guardados en: {ruta_json_salida}")
     except Exception as e:
-        print(f"\n✗ Error al guardar JSON: {e}")
+        print(f"\nError al guardar JSON: {e}")
 else:
-    print("\n✗ No hay centroides para guardar")
+    print("\nNo hay centroides para guardar")
 
 if exportar_video and video_writer is not None:
     video_writer.release()
-    print("✓ Video procesado guardado en: video_procesado_punto4.mp4")
+    print(f"Video procesado guardado en: {ruta_video_salida}")
 
 cap.release()
 cv2.destroyAllWindows()
