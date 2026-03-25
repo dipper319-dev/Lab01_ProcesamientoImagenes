@@ -52,6 +52,19 @@ class AnalisisCinematico:
         print(f"  - Duración: {self.tiempos[-1]:.2f}s")
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _suavizado_ligero(signal, max_window=9, polyorder=2):
+        n = len(signal)
+        if n < 5:
+            return signal.copy()
+
+        window = min(max_window, n if n % 2 != 0 else n - 1)
+        if window < polyorder + 2:
+            return signal.copy()
+
+        return savgol_filter(signal, window, polyorder)
+
+    # ------------------------------------------------------------------
     def calibrar_escala(self, pixel_A, pixel_B, distancia_real_metros):
         """
         Calibra la escala de píxeles a metros.
@@ -120,7 +133,8 @@ class AnalisisCinematico:
         if ventana < orden_polinomio + 2:
             # Si hay muy pocos datos, usar media móvil simple como fallback
             print("⚠  Pocos datos para Savitzky-Golay, usando media móvil simple")
-            kernel = np.ones(5) / 5
+            kernel_len = min(5, n)
+            kernel = np.ones(kernel_len) / kernel_len
             self.posicion_suavizada = np.convolve(
                 self.posicion_metros, kernel, mode='same'
             )
@@ -134,8 +148,8 @@ class AnalisisCinematico:
     # ------------------------------------------------------------------
     def calcular_velocidad(self):
         """
-        Calcula velocidad instantánea por diferencias finitas hacia adelante
-        sobre la señal SUAVIZADA (no sobre el ruido crudo).
+        Calcula velocidad instantánea usando derivada numérica central
+        sobre la señal suavizada.
         """
         if self.posicion_suavizada is None:
             print("⚠  Calculando velocidad sobre señal sin suavizar (no recomendado)")
@@ -148,14 +162,14 @@ class AnalisisCinematico:
             print("⚠  Datos insuficientes para derivada: velocidad asignada a cero")
             return
 
-        desplazamiento = np.diff(señal)
-        tiempo_diff    = np.diff(self.tiempos)
+        dt = np.diff(self.tiempos)
+        if np.any(dt <= 0):
+            print("❌ Error: vector de tiempos no monótono creciente")
+            self.velocidad = np.zeros(len(señal))
+            return
 
-        velocidad       = np.zeros(len(señal))
-        velocidad[:-1]  = desplazamiento / tiempo_diff
-        velocidad[-1]   = velocidad[-2]   # Extrapolar último valor
-
-        self.velocidad = velocidad
+        velocidad = np.gradient(señal, self.tiempos)
+        self.velocidad = self._suavizado_ligero(velocidad, max_window=9, polyorder=2)
 
         print(f"\n=== VELOCIDAD ===")
         print(f"Velocidad promedio : {np.mean(self.velocidad):.4f} m/s")
@@ -177,14 +191,14 @@ class AnalisisCinematico:
             print("⚠  Datos insuficientes para segunda derivada: aceleración asignada a cero")
             return
 
-        velocidad_diff = np.diff(self.velocidad)
-        tiempo_diff    = np.diff(self.tiempos)
+        dt = np.diff(self.tiempos)
+        if np.any(dt <= 0):
+            print("❌ Error: vector de tiempos no monótono creciente")
+            self.aceleracion = np.zeros(len(self.velocidad))
+            return
 
-        aceleracion      = np.zeros(len(self.velocidad))
-        aceleracion[:-1] = velocidad_diff / tiempo_diff
-        aceleracion[-1]  = aceleracion[-2]
-
-        self.aceleracion = aceleracion
+        aceleracion = np.gradient(self.velocidad, self.tiempos)
+        self.aceleracion = self._suavizado_ligero(aceleracion, max_window=9, polyorder=2)
 
         print(f"\n=== ACELERACIÓN ===")
         print(f"Aceleración promedio : {np.mean(self.aceleracion):.4f} m/s²")
@@ -358,11 +372,12 @@ if __name__ == "__main__":
 
     # --- Calibración ---
     print("\n⚠️  CALIBRACIÓN REQUERIDA:")
-    print("Observa en el video los marcadores A y B y anota sus coordenadas X en píxeles.")
+    print("Convención usada: A = cono derecho, B = cono izquierdo.")
+    print("Anota las coordenadas X de A y B desde el video procesado.")
 
     try:
-        pixel_A = float(input("\nIngresa coordenada X del punto A (píxeles): "))
-        pixel_B = float(input("Ingresa coordenada X del punto B (píxeles): "))
+        pixel_A = float(input("\nIngresa coordenada X del punto A (cono derecho, píxeles): "))
+        pixel_B = float(input("Ingresa coordenada X del punto B (cono izquierdo, píxeles): "))
         dist_real = float(input("Ingresa la distancia real A-B (metros): "))
     except ValueError:
         print("❌ Error: debes ingresar números válidos")

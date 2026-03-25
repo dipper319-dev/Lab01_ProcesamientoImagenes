@@ -44,9 +44,18 @@ Si usas `PowerShell`, puede que necesites:
 python -m pip install -r requirements.txt
 ```
 
-## Ejecución (Punto 2 y Punto 3)
+## Flujo de ejecución recomendado
 
-### 1) Detección y segmentación (Punto 2)
+Ejecuta solo 2 comandos en este orden:
+
+1. `python codigo/deteccion.py`  → cubre Punto 2 y Punto 4 en la misma corrida.
+2. `python codigo/analisis_cinematico.py` → cubre Punto 3 usando el JSON generado.
+
+No es necesario ejecutar `deteccion.py` dos veces (a menos que quieras recalibrar, ajustar segmentación o volver a exportar video).
+
+## Ejecución detallada (por puntos)
+
+### 1) Detección + visualización (Punto 2 y Punto 4 en una sola ejecución)
 
 Ejecuta:
 
@@ -60,12 +69,13 @@ Controles durante ejecución:
 - Clic derecho: pausar/reanudar video.
 - Tecla `Esc`: salir.
 
-Salida principal generada:
+Salidas principales generadas:
 
 - `datos_cinematicos.json` con:
 	- FPS y resolución del video.
 	- lista de centroides por frame detectado.
 	- vector de tiempos asociado.
+- `video_procesado_punto4.mp4` (si respondes `s` al exportar video).
 
 ### 2) Análisis cinemático (Punto 3)
 
@@ -85,6 +95,10 @@ Salidas generadas:
 
 - `graficas_cinematica.png` (posición, velocidad y aceleración vs tiempo).
 - `resultados_cinematicos.csv` (tiempo, centroides, posición, velocidad, aceleración).
+
+### 3) Análisis cinemático (Punto 3)
+
+Se ejecuta después de terminar la detección/visualización, usando el archivo `datos_cinematicos.json` generado en el paso anterior.
 
 ## Cobertura de la rúbrica (hasta Punto 3)
 
@@ -112,4 +126,21 @@ Implementado en `codigo/analisis_cinematico.py`:
 - Suavizado de señal (Savitzky-Golay) antes de derivar.
 - Clasificación del tipo de movimiento y comparación con modelo teórico (MRU/MRUA).
 - Gráficas y exportación de resultados en CSV.
+
+## Punto 4 (Visualización y resultados)
+
+Implementado en `codigo/deteccion.py`:
+
+- Superposición de trayectoria histórica del centroide sobre el video.
+- Visualización en tiempo real de velocidad instantánea (`px/s` y `m/s`).
+- Marcadores visuales A/B con líneas verticales ajustables por trackbar.
+- Escala métrica en pantalla (`m`, `px`, `px/m`) usando distancia A-B configurable.
+- Exportación opcional de video final procesado: `video_procesado_punto4.mp4`.
+
+Uso sugerido para el Punto 4:
+
+1. Ejecuta `python codigo/deteccion.py`.
+2. Responde `s` si deseas guardar video final procesado.
+3. Ajusta en trackbars: `A X`, `B X`, `Dist AB cm`.
+4. Verifica en pantalla trayectoria, velocidad y escala durante la detección.
 
