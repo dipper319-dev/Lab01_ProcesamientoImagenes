@@ -113,3 +113,20 @@ Implementado en `codigo/analisis_cinematico.py`:
 - Clasificación del tipo de movimiento y comparación con modelo teórico (MRU/MRUA).
 - Gráficas y exportación de resultados en CSV.
 
+## Punto 4 (Visualización y resultados)
+
+Implementado en `codigo/deteccion.py`:
+
+- Superposición de trayectoria histórica del centroide sobre el video.
+- Visualización en tiempo real de velocidad instantánea (`px/s` y `m/s`).
+- Marcadores visuales A/B con líneas verticales ajustables por trackbar.
+- Escala métrica en pantalla (`m`, `px`, `px/m`) usando distancia A-B configurable.
+- Exportación opcional de video final procesado: `video_procesado_punto4.mp4`.
+
+Uso sugerido para el Punto 4:
+
+1. Ejecuta `python codigo/deteccion.py`.
+2. Responde `s` si deseas guardar video final procesado.
+3. Ajusta en trackbars: `A X`, `B X`, `Dist AB cm`.
+4. Verifica en pantalla trayectoria, velocidad y escala durante la detección.
+
