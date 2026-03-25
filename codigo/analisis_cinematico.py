@@ -372,11 +372,12 @@ if __name__ == "__main__":
 
     # --- Calibración ---
     print("\n⚠️  CALIBRACIÓN REQUERIDA:")
-    print("Observa en el video los marcadores A y B y anota sus coordenadas X en píxeles.")
+    print("Convención usada: A = cono derecho, B = cono izquierdo.")
+    print("Anota las coordenadas X de A y B desde el video procesado.")
 
     try:
-        pixel_A = float(input("\nIngresa coordenada X del punto A (píxeles): "))
-        pixel_B = float(input("Ingresa coordenada X del punto B (píxeles): "))
+        pixel_A = float(input("\nIngresa coordenada X del punto A (cono derecho, píxeles): "))
+        pixel_B = float(input("Ingresa coordenada X del punto B (cono izquierdo, píxeles): "))
         dist_real = float(input("Ingresa la distancia real A-B (metros): "))
     except ValueError:
         print("❌ Error: debes ingresar números válidos")

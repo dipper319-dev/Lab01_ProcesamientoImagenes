@@ -23,19 +23,44 @@ velocidad_inst_m_s = 0.0
 
 mezcla_hsv_txt = 0
 ax = 100
+ay = 100
 bx = 300
+by = 100
 distancia_ab_cm = 500
 distancia_ab_m = 5.0
 px_por_m = 0.0
+mostrar_marcadores = True
+modo_seleccion_marcador = None
+
+WARMUP_FRAMES = 20
+MAX_DIST_SEGUIMIENTO_PX = 150
+MAX_GAP_FACTOR = 3.0
+AREA_MAX_RATIO = 0.35
+BORDER_MARGIN_PX = 20
+ASPECT_MIN = 0.8
+ASPECT_MAX = 5.5
+TRACK_LOST_FRAMES = 10
+
+frames_sin_deteccion = 0
 
 
 def mouse_callback(event, _x, _y, flags, param):
     global pausar_video, mostrar_pixel, x, y
+    global ax, ay, bx, by, modo_seleccion_marcador
 
     if event == cv2.EVENT_LBUTTONDOWN:
-        x, y = _x, _y
-        mostrar_pixel = True
-        print(f"📍 Clic en X={_x}, Y={_y}  ← usa este valor para calibración")
+        if modo_seleccion_marcador == "A":
+            ax, ay = _x, _y
+            modo_seleccion_marcador = None
+            print(f"✅ Marcador A fijado: ({ax}, {ay})")
+        elif modo_seleccion_marcador == "B":
+            bx, by = _x, _y
+            modo_seleccion_marcador = None
+            print(f"✅ Marcador B fijado: ({bx}, {by})")
+        else:
+            x, y = _x, _y
+            mostrar_pixel = True
+            print(f"📍 Clic en X={_x}, Y={_y}  ← usa este valor para calibración")
 
     if event == cv2.EVENT_RBUTTONDOWN:
         pausar_video = not pausar_video
@@ -58,7 +83,14 @@ frame_num = 0
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+# Posiciones iniciales aproximadas; convención: A=cono derecho, B=cono izquierdo
+ax = int(0.95 * frame_width)
+ay = int(0.62 * frame_height)
+bx = int(0.06 * frame_width)
+by = int(0.62 * frame_height)
+
 print("\n=== Configuración Punto 4 ===")
+print("Controles: tecla 'a' + clic para fijar A en cono derecho; tecla 'b' + clic para B en cono izquierdo; tecla 'm' para ocultar/mostrar A-B.")
 resp = input("¿Deseas guardar video final procesado? (s/n): ").strip().lower()
 exportar_video = resp == 's'
 
@@ -100,6 +132,57 @@ def nothing(value):
     pass
 
 
+def seleccionar_mejor_contorno(contornos, area_minima, ultimo_centroide_ref, ancho_frame, alto_frame):
+    area_maxima = AREA_MAX_RATIO * ancho_frame * alto_frame
+    candidatos_validos = []
+
+    for contorno in contornos:
+        area = cv2.contourArea(contorno)
+        if area < area_minima or area > area_maxima:
+            continue
+
+        x_box, y_box, w_box, h_box = cv2.boundingRect(contorno)
+        if w_box <= 0 or h_box <= 0:
+            continue
+
+        relacion_aspecto = w_box / float(h_box)
+        if relacion_aspecto < ASPECT_MIN or relacion_aspecto > ASPECT_MAX:
+            continue
+
+        momentos = cv2.moments(contorno)
+        if momentos["m00"] == 0:
+            continue
+
+        cx = int(momentos["m10"] / momentos["m00"])
+        cy = int(momentos["m01"] / momentos["m00"])
+
+        if cx < BORDER_MARGIN_PX or cx > (ancho_frame - BORDER_MARGIN_PX):
+            continue
+        if cy < BORDER_MARGIN_PX or cy > (alto_frame - BORDER_MARGIN_PX):
+            continue
+
+        candidatos_validos.append((contorno, cx, cy, area))
+
+    if not candidatos_validos:
+        return None
+
+    if ultimo_centroide_ref is None:
+        return max(candidatos_validos, key=lambda item: item[3])
+
+    candidatos_cercanos = []
+    for candidato in candidatos_validos:
+        _, cx, cy, area = candidato
+        dist = np.hypot(cx - ultimo_centroide_ref[0], cy - ultimo_centroide_ref[1])
+        if dist <= MAX_DIST_SEGUIMIENTO_PX:
+            candidatos_cercanos.append((dist, -area, candidato))
+
+    if candidatos_cercanos:
+        candidatos_cercanos.sort(key=lambda item: (item[0], item[1]))
+        return candidatos_cercanos[0][2]
+
+    return max(candidatos_validos, key=lambda item: item[3])
+
+
 cv2.createTrackbar("Area Min", "Trackbars", 500, 10000, nothing)
 cv2.createTrackbar("Kernel", "Trackbars", 5, 15, nothing)
 cv2.createTrackbar("Sensibilidad", "Trackbars", 50, 200, nothing)
@@ -110,8 +193,6 @@ cv2.createTrackbar("S Min", "Trackbars", 0, 255, nothing)
 cv2.createTrackbar("S Max", "Trackbars", 255, 255, nothing)
 cv2.createTrackbar("V Min", "Trackbars", 0, 255, nothing)
 cv2.createTrackbar("V Max", "Trackbars", 255, 255, nothing)
-cv2.createTrackbar("A X", "Trackbars", min(200, frame_width - 1), max(frame_width - 1, 1), nothing)
-cv2.createTrackbar("B X", "Trackbars", min(1200, frame_width - 1), max(frame_width - 1, 1), nothing)
 cv2.createTrackbar("Dist AB cm", "Trackbars", 500, 5000, nothing)
 
 while True:
@@ -135,8 +216,6 @@ while True:
         s_max = cv2.getTrackbarPos("S Max", "Trackbars")
         v_min = cv2.getTrackbarPos("V Min", "Trackbars")
         v_max = cv2.getTrackbarPos("V Max", "Trackbars")
-        ax = cv2.getTrackbarPos("A X", "Trackbars")
-        bx = cv2.getTrackbarPos("B X", "Trackbars")
         distancia_ab_cm = cv2.getTrackbarPos("Dist AB cm", "Trackbars")
 
         subtractor.setVarThreshold(max(sensibilidad, 1))
@@ -173,34 +252,46 @@ while True:
         cx_guardado = None
         cy_guardado = None
 
-        if len(contornos) > 0:
-            contorno_candidato = max(contornos, key=cv2.contourArea)
+        if frame_num >= WARMUP_FRAMES:
+            candidato = seleccionar_mejor_contorno(
+                contornos,
+                area_min,
+                ultimo_centroide,
+                frame_width,
+                frame_height
+            )
 
-            if cv2.contourArea(contorno_candidato) > area_min:
-                momentos = cv2.moments(contorno_candidato)
+            if candidato is not None:
+                contorno_guardado, cx_guardado, cy_guardado, _ = candidato
 
-                if momentos["m00"] != 0:
-                    cx_guardado = int(momentos["m10"] / momentos["m00"])
-                    cy_guardado = int(momentos["m01"] / momentos["m00"])
-                    contorno_guardado = contorno_candidato
+                tiempo_actual = frame_num / fps
+                centroide_actual = (cx_guardado, cy_guardado)
 
-                    tiempo_actual = frame_num / fps
-                    centroides.append((cx_guardado, cy_guardado))
-                    tiempos.append(tiempo_actual)
+                if ultimo_centroide is not None and ultimo_tiempo is not None:
+                    dt = tiempo_actual - ultimo_tiempo
+                    if dt > 1e-9:
+                        dx = centroide_actual[0] - ultimo_centroide[0]
+                        dy = centroide_actual[1] - ultimo_centroide[1]
+                        velocidad_inst_px_s = float(np.hypot(dx, dy)) / dt
+                else:
+                    velocidad_inst_px_s = 0.0
 
-                    if ultimo_centroide is not None and ultimo_tiempo is not None:
-                        dt = tiempo_actual - ultimo_tiempo
-                        if dt > 1e-9:
-                            dx = cx_guardado - ultimo_centroide[0]
-                            dy = cy_guardado - ultimo_centroide[1]
-                            velocidad_inst_px_s = float(np.hypot(dx, dy)) / dt
+                centroides.append(centroide_actual)
+                tiempos.append(tiempo_actual)
+                ultimo_centroide = centroide_actual
+                ultimo_tiempo = tiempo_actual
+                frames_sin_deteccion = 0
+            else:
+                frames_sin_deteccion += 1
+                if frames_sin_deteccion > TRACK_LOST_FRAMES:
+                    ultimo_centroide = None
+                    ultimo_tiempo = None
+                    velocidad_inst_px_s = 0.0
 
-                    ultimo_centroide = (cx_guardado, cy_guardado)
-                    ultimo_tiempo = tiempo_actual
-
-        if abs(bx - ax) > 0 and distancia_ab_cm > 0:
+        distancia_ab_px = float(np.hypot(bx - ax, by - ay))
+        if distancia_ab_px > 0 and distancia_ab_cm > 0:
             distancia_ab_m = distancia_ab_cm / 100.0
-            px_por_m = abs(bx - ax) / distancia_ab_m
+            px_por_m = distancia_ab_px / distancia_ab_m
             velocidad_inst_m_s = velocidad_inst_px_s / px_por_m
         else:
             distancia_ab_m = 0.0
@@ -245,19 +336,26 @@ while True:
         cv2.putText(frame2, area_txt, (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
 
     if len(centroides) >= 2:
-        trayectoria = np.array(centroides, dtype=np.int32).reshape((-1, 1, 2))
-        cv2.polylines(frame2, [trayectoria], False, (255, 0, 255), 2)
+        max_gap_t = MAX_GAP_FACTOR / fps
+        for i in range(1, len(centroides)):
+            p0 = centroides[i - 1]
+            p1 = centroides[i]
+            dt = tiempos[i] - tiempos[i - 1]
+            salto = np.hypot(p1[0] - p0[0], p1[1] - p0[1])
+            if dt <= max_gap_t and salto <= (MAX_DIST_SEGUIMIENTO_PX * 1.6):
+                cv2.line(frame2, p0, p1, (255, 0, 255), 2)
     cv2.putText(frame2, f"Trayectoria: {len(centroides)} pts", (10, 225),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
 
-    cv2.line(frame2, (ax, 0), (ax, frame_height - 1), (255, 255, 0), 2)
-    cv2.line(frame2, (bx, 0), (bx, frame_height - 1), (255, 255, 0), 2)
-    cv2.putText(frame2, "A", (ax + 5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 0), 2)
-    cv2.putText(frame2, "B", (bx + 5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 0), 2)
+    if mostrar_marcadores:
+        cv2.circle(frame2, (ax, ay), 8, (255, 255, 0), -1)
+        cv2.circle(frame2, (bx, by), 8, (255, 255, 0), -1)
+        cv2.putText(frame2, "A", (ax + 10, ay - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        cv2.putText(frame2, "B", (bx + 10, by - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        cv2.line(frame2, (ax, ay), (bx, by), (0, 255, 255), 2)
 
-    if abs(bx - ax) > 0 and distancia_ab_cm > 0:
-        cv2.line(frame2, (ax, frame_height - 30), (bx, frame_height - 30), (0, 255, 255), 3)
-        texto_escala = f"Escala: {distancia_ab_m:.2f} m = {abs(bx - ax)} px ({px_por_m:.2f} px/m)"
+    if float(np.hypot(bx - ax, by - ay)) > 0 and distancia_ab_cm > 0:
+        texto_escala = f"Escala: {distancia_ab_m:.2f} m = {int(np.hypot(bx - ax, by - ay))} px ({px_por_m:.2f} px/m)"
         cv2.putText(frame2, texto_escala, (10, frame_height - 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
@@ -275,9 +373,22 @@ while True:
 
     cv2.putText(frame2, f"Velocidad: {velocidad_inst_px_s:.2f} px/s | {velocidad_inst_m_s:.3f} m/s",
                 (10, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 215, 255), 2)
+    cv2.putText(frame2, "Teclas: a=marcar A, b=marcar B, m=ocultar/mostrar A-B",
+                (10, 275), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 255, 255), 2)
+
+    if modo_seleccion_marcador == "A":
+        cv2.putText(frame2, "Seleccion A: haz clic sobre el cono derecho", (10, 300),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+    elif modo_seleccion_marcador == "B":
+        cv2.putText(frame2, "Seleccion B: haz clic sobre el cono izquierdo", (10, 300),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+
+    if frame_num < WARMUP_FRAMES:
+        cv2.putText(frame2, f"Inicializando fondo: {frame_num}/{WARMUP_FRAMES}",
+                    (10, 325), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
 
     if pausar_video:
-        cv2.putText(frame2, "|| PAUSADO", (10, 285),
+        cv2.putText(frame2, "|| PAUSADO", (10, 350),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
 
     cv2.imshow("Video", frame2)
@@ -293,6 +404,18 @@ while True:
 
     if key == 27:
         break
+
+    if key == ord('a'):
+        modo_seleccion_marcador = "A"
+        print("🟨 Selección A activada: haz clic en el cono derecho")
+
+    if key == ord('b'):
+        modo_seleccion_marcador = "B"
+        print("🟨 Selección B activada: haz clic en el cono izquierdo")
+
+    if key == ord('m'):
+        mostrar_marcadores = not mostrar_marcadores
+        print("👁️ Marcadores A/B visibles" if mostrar_marcadores else "🙈 Marcadores A/B ocultos")
 
     if key == ord('s'):
         print(f"\n--- Estado actual en frame {frame_num} ---")
@@ -320,9 +443,12 @@ if len(centroides) > 0:
         "total_centroides": len(centroides),
         "calibracion_punto4": {
             "A_x_px": int(ax),
+            "A_y_px": int(ay),
             "B_x_px": int(bx),
+            "B_y_px": int(by),
             "distancia_AB_cm": int(distancia_ab_cm),
             "distancia_AB_m": float(distancia_ab_m),
+            "distancia_AB_px": float(np.hypot(bx - ax, by - ay)),
             "px_por_m": float(px_por_m)
         },
         "centroides": [
